@@ -75,7 +75,7 @@ def handle_member_join(event):
             welcome_text = (
                 f"@{display_name} 歡迎歡迎(你好)🫶🏻\n\n"
                 "果醬只做當季水果\n"
-                "年節禮盒\n\n"
+                "禮盒目前做中秋節&過年\n\n"
                 "很常老闆娘還沒收錢，你就會收到貨\n"
                 "這時候記得來找闆娘\n"
                 "大家是老客戶～都有默契！！\n\n"
