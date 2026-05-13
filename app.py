@@ -17,18 +17,16 @@ logging.basicConfig(level=logging.INFO)
 # =========================
 # LINE 設定 (請填入你的設定)
 # =========================
-CHANNEL_ACCESS_TOKEN = "你的TOKEN"
-CHANNEL_SECRET = "你的SECRET"
+CHANNEL_ACCESS_TOKEN = "oFUPzoB75X9XQD5Ac1onzxxg9Anv3IsmKY67YWGhPIlwONFDHCisv8Puh2Lop2EsnU0Ygvc7OJYniPgnChVUKXe0bW8nJ5ETIoKcgx2Fe5ILVGRlNcj4LujcNwjzfVGfc5M6vyYyWMG780xnicpMuQdB04t89/1O/w1cDnyilFU="
+CHANNEL_SECRET = "18658576141b5169e2ea8ab7c840ddea"
 
 line_bot_api = LineBotApi(CHANNEL_ACCESS_TOKEN)
 handler = WebhookHandler(CHANNEL_SECRET)
 
 # =========================
-# 🛍️ 特定品項設定 (只有這些字會被統計)
+# 🛍️ 特定品項設定
 # =========================
-# 在這裡填入你想統計的關鍵字，例如：["果醬", "禮盒", "餐盒"]
-# 如果要新增品項，直接在括號內加引號跟逗號即可
-ALLOWED_ITEMS = ["果醬", "年節禮盒", "外燴", "餐盒"]
+ALLOWED_ITEMS = ["草莓果醬", "果醬", "年節禮盒", "外燴", "餐盒"]
 
 # =========================
 # 資料儲存
@@ -58,43 +56,59 @@ def callback():
     return 'OK'
 
 # =========================
-# 1. 新成員加入：客製化歡迎詞
+# 1. 新成員加入：自動標註(@) + 客製化歡迎詞
 # =========================
 @handler.add(MemberJoinedEvent)
 def handle_member_join(event):
     try:
         group_id = event.source.group_id
-        welcome_text = (
-            "歡迎歡迎(你好)\n\n"
-            "果醬只做當季水果\n"
-            "年節禮盒\n\n"
-            "很常老闆娘還沒收錢，你就會收到貨\n"
-            "這時候記得來找闆娘\n"
-            "大家是老客戶～都有默契！！\n\n"
-            "從熬煮、製作到包裝都是一人作業\n"
-            "所以要等等闆娘喔😍\n\n"
-            "至於外燴、餐盒、需要幫忙客製化的禮盒。都可以直接私訊闆娘處理🫶🏻"
-        )
-        line_bot_api.push_message(group_id, TextSendMessage(text=welcome_text))
+        # 獲取所有剛加入的成員 ID
+        new_members = event.joined.members
+        
+        for member in new_members:
+            user_id = member.user_id
+            
+            # 建立標註物件
+            # index 0 代表 @ 符號出現在字串的最前面
+            mention = Mention(mentionees=[Mentionee(index=0, length=3, user_id=user_id)])
+            
+            welcome_text = (
+                "@人  歡迎歡迎(你好)\n\n"
+                "果醬只做當季水果\n"
+                "年節禮盒\n\n"
+                "很常老闆娘還沒收錢，你就會收到貨\n"
+                "這時候記得來找闆娘\n"
+                "大家是老客戶～都有默契！！\n\n"
+                "從熬煮、製作到包裝都是一人作業\n"
+                "所以要等等闆娘喔😍\n\n"
+                "至於外燴、餐盒、需要幫忙客製化的禮盒。都可以直接私訊闆娘處理🫶🏻"
+            )
+            
+            # 發送含有標註的訊息
+            line_bot_api.push_message(
+                group_id,
+                TextSendMessage(text=welcome_text, quote_token=None, mention=mention)
+            )
+            
     except Exception as e:
         logging.error(f"❌ Join Error: {e}")
 
 # =========================
-# 2. 訊息處理 (含特定字偵測)
+# 2. 訊息處理 (網址偵測、多品項統計、清零)
 # =========================
 @handler.add(MessageEvent, message=TextMessage)
 def handle_message(event):
     try:
         text = event.message.text.strip()
 
-        # --- A. 網址偵測 (僅提醒) ---
+        # --- A. 網址偵測 ---
         if re.search(url_pattern, text):
             reply_msg = "⚠️ 溫馨提示：群組內請避免亂貼連結，請遵守群規喔！"
             line_bot_api.reply_message(event.reply_token, TextSendMessage(text=reply_msg))
             return
 
         # --- B. 管理員指令：清空統計 ---
-        if text == "闆娘指令清空統計":
+        if text == "清空統計":
             counter_data.clear()
             line_bot_api.reply_message(event.reply_token, TextSendMessage(text="✅ 已清空所有統計資料！"))
             return
@@ -106,8 +120,6 @@ def handle_message(event):
         if items_found:
             for item_name, operator, num_str in items_found:
                 item = item_name.strip()
-                
-                # ⭐ 核心邏輯：檢查品項是否在允許清單內
                 if item in ALLOWED_ITEMS:
                     number = int(num_str)
                     if operator == '+':
@@ -116,13 +128,12 @@ def handle_message(event):
                         counter_data[item] = max(0, counter_data[item] - number)
                     updated = True
             
-            # 只有當真的有統計到「清單內品項」時才回覆，避免干擾一般聊天
             if updated:
                 active_items = {k: v for k, v in counter_data.items() if v > 0}
                 if not active_items:
-                    summary = "📊 目前暫無訂單（統計已歸零）。"
+                    summary = "🎀目前暫無訂單🎀（統計已歸零）。"
                 else:
-                    summary = "📊 目前最新訂購彙整：\n\n"
+                    summary = "目前最新訂購彙整：\n\n"
                     for k, v in active_items.items():
                         summary += f"▫️ {k}：{v}\n"
                     summary += "\n感謝大家的支持！"
