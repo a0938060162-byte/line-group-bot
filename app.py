@@ -26,10 +26,10 @@ handler = WebhookHandler(CHANNEL_SECRET)
 # =========================
 # 🛍️ 特定品項設定
 # =========================
-ALLOWED_ITEMS = ["草莓果醬", "果醬", "年節禮盒", "外燴", "餐盒"]
+ALLOWED_ITEMS = ["草莓果醬", "鳳梨酥", "年節禮盒", "甜燒餅", "餐盒"]
 
 # =========================
-# 資料儲存
+# 資料儲存 (記憶體版)
 # =========================
 counter_data = defaultdict(int)
 
@@ -56,24 +56,20 @@ def callback():
     return 'OK'
 
 # =========================
-# 1. 新成員加入：自動標註(@) + 客製化歡迎詞
+# 1. 新成員加入：自動標註(@) + 歡迎詞
 # =========================
 @handler.add(MemberJoinedEvent)
 def handle_member_join(event):
     try:
         group_id = event.source.group_id
-        # 獲取所有剛加入的成員 ID
         new_members = event.joined.members
         
         for member in new_members:
             user_id = member.user_id
             
-            # 建立標註物件
-            # index 0 代表 @ 符號出現在字串的最前面
-            mention = Mention(mentionees=[Mentionee(index=0, length=3, user_id=user_id)])
-            
+            # 建立歡迎文案：開頭預留一個空格給標註功能
             welcome_text = (
-                "@人  歡迎歡迎(你好)\n\n"
+                " 歡迎歡迎(你好)🫶🏻\n\n"
                 "果醬只做當季水果\n"
                 "年節禮盒\n\n"
                 "很常老闆娘還沒收錢，你就會收到貨\n"
@@ -84,24 +80,27 @@ def handle_member_join(event):
                 "至於外燴、餐盒、需要幫忙客製化的禮盒。都可以直接私訊闆娘處理🫶🏻"
             )
             
-            # 發送含有標註的訊息
+            # 設定標註：index=0 代表標註在第 1 個字元（即我們預留的空格）
+            mention = Mention(mentionees=[Mentionee(index=0, length=1, user_id=user_id)])
+            
             line_bot_api.push_message(
                 group_id,
-                TextSendMessage(text=welcome_text, quote_token=None, mention=mention)
+                TextSendMessage(text=welcome_text, mention=mention)
             )
+            logging.info(f"✅ 已標註並歡迎新成員: {user_id}")
             
     except Exception as e:
-        logging.error(f"❌ Join Error: {e}")
+        logging.error(f"❌ Join Event Error: {e}")
 
 # =========================
-# 2. 訊息處理 (網址偵測、多品項統計、清零)
+# 2. 訊息處理 (網址偵測、統計、清零)
 # =========================
 @handler.add(MessageEvent, message=TextMessage)
 def handle_message(event):
     try:
         text = event.message.text.strip()
 
-        # --- A. 網址偵測 ---
+        # --- A. 網址偵測 (僅提醒) ---
         if re.search(url_pattern, text):
             reply_msg = "⚠️ 溫馨提示：群組內請避免亂貼連結，請遵守群規喔！"
             line_bot_api.reply_message(event.reply_token, TextSendMessage(text=reply_msg))
@@ -113,7 +112,7 @@ def handle_message(event):
             line_bot_api.reply_message(event.reply_token, TextSendMessage(text="✅ 已清空所有統計資料！"))
             return
 
-        # --- C. 特定品項統計邏輯 ---
+        # --- C. 特定品項統計邏輯 (支援多品項加減) ---
         items_found = re.findall(multi_count_pattern, text)
         
         updated = False
@@ -144,5 +143,8 @@ def handle_message(event):
     except Exception as e:
         logging.error(f"❌ Message Error: {e}")
 
+# =========================
+# 啟動伺服器
+# =========================
 if __name__ == "__main__":
     app.run(host='0.0.0.0', port=5000)
