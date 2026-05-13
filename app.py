@@ -1,7 +1,11 @@
 from flask import Flask, request, abort
 from linebot import LineBotApi, WebhookHandler
 from linebot.exceptions import InvalidSignatureError
-from linebot.models import *
+# 這裡修正了類別匯入，確保 Mention 功能正常
+from linebot.models import (
+    MessageEvent, TextMessage, TextSendMessage, 
+    MemberJoinedEvent, Mention, Mentionee
+)
 
 import re
 import logging
@@ -15,7 +19,7 @@ app = Flask(__name__)
 logging.basicConfig(level=logging.INFO)
 
 # =========================
-# LINE 設定 (請填入你的設定)
+# LINE 設定 (請務必填寫真實資料)
 # =========================
 CHANNEL_ACCESS_TOKEN = "oFUPzoB75X9XQD5Ac1onzxxg9Anv3IsmKY67YWGhPIlwONFDHCisv8Puh2Lop2EsnU0Ygvc7OJYniPgnChVUKXe0bW8nJ5ETIoKcgx2Fe5ILVGRlNcj4LujcNwjzfVGfc5M6vyYyWMG780xnicpMuQdB04t89/1O/w1cDnyilFU="
 CHANNEL_SECRET = "18658576141b5169e2ea8ab7c840ddea"
@@ -26,10 +30,10 @@ handler = WebhookHandler(CHANNEL_SECRET)
 # =========================
 # 🛍️ 特定品項設定
 # =========================
-ALLOWED_ITEMS = ["草莓果醬", "鳳梨酥", "年節禮盒", "甜燒餅", "餐盒"]
+ALLOWED_ITEMS = ["草莓果醬", "甜燒餅", "年節禮盒", "鳳梨酥", "餐盒"]
 
 # =========================
-# 資料儲存 (記憶體版)
+# 資料儲存 (暫時記憶體)
 # =========================
 counter_data = defaultdict(int)
 
@@ -56,7 +60,7 @@ def callback():
     return 'OK'
 
 # =========================
-# 1. 新成員加入：自動標註(@) + 歡迎詞
+# 1. 新成員加入：穩定版標註 + 歡迎詞
 # =========================
 @handler.add(MemberJoinedEvent)
 def handle_member_join(event):
@@ -67,9 +71,16 @@ def handle_member_join(event):
         for member in new_members:
             user_id = member.user_id
             
-            # 建立歡迎文案：開頭預留一個空格給標註功能
+            # 獲取使用者名字，若失敗則顯示「新朋友」
+            try:
+                profile = line_bot_api.get_group_member_profile(group_id, user_id)
+                display_name = profile.display_name
+            except Exception:
+                display_name = "新朋友"
+
+            # --- 修正縮排與文字區塊 ---
             welcome_text = (
-                " 歡迎歡迎(你好)🫶🏻\n\n"
+                f"@{display_name} 歡迎歡迎(你好)🫶🏻\n\n"
                 "果醬只做當季水果\n"
                 "年節禮盒\n\n"
                 "很常老闆娘還沒收錢，你就會收到貨\n"
@@ -80,15 +91,25 @@ def handle_member_join(event):
                 "至於外燴、餐盒、需要幫忙客製化的禮盒。都可以直接私訊闆娘處理🫶🏻"
             )
             
-            # 設定標註：index=0 代表標註在第 1 個字元（即我們預留的空格）
-            mention = Mention(mentionees=[Mentionee(index=0, length=1, user_id=user_id)])
+            # 標註邏輯：計算標註長度 (@ + 名字)
+            mention_len = len(display_name) + 1
+            mention = Mention(mentionees=[Mentionee(index=0, length=mention_len, user_id=user_id)])
             
-            line_bot_api.push_message(
-                group_id,
-                TextSendMessage(text=welcome_text, mention=mention)
-            )
-            logging.info(f"✅ 已標註並歡迎新成員: {user_id}")
-            
+            try:
+                # 嘗試發送標註版
+                line_bot_api.push_message(
+                    group_id,
+                    TextSendMessage(text=welcome_text, mention=mention)
+                )
+                logging.info(f"✅ 已成功標註並歡迎: {display_name}")
+            except Exception as e:
+                # 若標註失敗，則發送純文字版
+                logging.error(f"標註失敗，改發純文字: {e}")
+                line_bot_api.push_message(
+                    group_id,
+                    TextSendMessage(text=welcome_text)
+                )
+                
     except Exception as e:
         logging.error(f"❌ Join Event Error: {e}")
 
@@ -100,7 +121,7 @@ def handle_message(event):
     try:
         text = event.message.text.strip()
 
-        # --- A. 網址偵測 (僅提醒) ---
+        # --- A. 網址偵測 ---
         if re.search(url_pattern, text):
             reply_msg = "⚠️ 溫馨提示：群組內請避免亂貼連結，請遵守群規喔！"
             line_bot_api.reply_message(event.reply_token, TextSendMessage(text=reply_msg))
@@ -112,7 +133,7 @@ def handle_message(event):
             line_bot_api.reply_message(event.reply_token, TextSendMessage(text="✅ 已清空所有統計資料！"))
             return
 
-        # --- C. 特定品項統計邏輯 (支援多品項加減) ---
+        # --- C. 特定品項統計邏輯 ---
         items_found = re.findall(multi_count_pattern, text)
         
         updated = False
