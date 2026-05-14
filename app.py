@@ -12,7 +12,6 @@ logging.basicConfig(level=logging.INFO)
 # =========================
 # LINE 設定
 # =========================
-# 請確保以下資訊與您的 LINE Developers 控制台一致
 CHANNEL_ACCESS_TOKEN = "oFUPzoB75X9XQD5Ac1onzxxg9Anv3IsmKY67YWGhPIlwONFDHCisv8Puh2Lop2EsnU0Ygvc7OJYniPgnChVUKXe0bW8nJ5ETIoKcgx2Fe5ILVGRlNcj4LujcNwjzfVGfc5M6vyYyWMG780xnicpMuQdB04t89/1O/w1cDnyilFU="
 CHANNEL_SECRET = "18658576141b5169e2ea8ab7c840ddea"
 
@@ -23,8 +22,10 @@ handler = WebhookHandler(CHANNEL_SECRET)
 # 🛍️ 統計設定
 # =========================
 ALLOWED_ITEMS = ["草莓果醬", "甜燒餅", "年節禮盒", "鳳梨酥", "餐盒"]
-# 格式：{ "使用者名稱": { "品項": 數量 } }
 order_records = {}
+
+# 網址偵測用的正規表達式
+url_pattern = r'(https?://[^\s]+|www\.[^\s]+)'
 
 @app.route("/callback", methods=['POST'])
 def callback():
@@ -39,11 +40,10 @@ def callback():
         abort(500)
     return 'OK'
 
-# 1. 新成員加入：更新版歡迎詞
+# 1. 新成員加入：歡迎詞
 @handler.add(MemberJoinedEvent)
 def handle_member_join(event):
     try:
-        # 依照您的要求更新文案
         welcome_msg = (
             "歡迎歡迎🫶🏻\n\n"
             "果醬只做當季水果\n"
@@ -59,7 +59,7 @@ def handle_member_join(event):
     except Exception as e:
         logging.error(f"Join Error: {e}")
 
-# 2. 訊息處理：明細統計功能
+# 2. 訊息處理：網址偵測 + 明細統計
 @handler.add(MessageEvent, message=TextMessage)
 def handle_message(event):
     global order_records
@@ -68,16 +68,21 @@ def handle_message(event):
         group_id = event.source.group_id
         user_id = event.source.user_id
 
-        # 管理員功能：清空統計
+        # --- A. 網址偵測與警告 ---
+        if re.search(url_pattern, text):
+            warning_msg = "⚠️ 溫馨提示：群組內請不要上傳布相關資訊及亂貼連結！謝謝"
+            line_bot_api.reply_message(event.reply_token, TextSendMessage(text=warning_msg))
+            return  # 偵測到網址後直接中斷，不執行下面的統計
+
+        # --- B. 管理員功能：清空統計 ---
         if text == "清空統計":
             order_records = {}
             line_bot_api.reply_message(event.reply_token, TextSendMessage(text="✅ 訂單明細已清空"))
             return
 
-        # 匹配關鍵字格式 (例如：草莓果醬+1)
+        # --- C. 訂單統計邏輯 ---
         match = re.findall(r'([^\s\+\-]+?)\s*([+\-])\s*(\d+)', text)
         if match:
-            # 取得成員暱稱
             try:
                 profile = line_bot_api.get_group_member_profile(group_id, user_id)
                 user_name = profile.display_name
@@ -101,19 +106,16 @@ def handle_message(event):
                     updated = True
             
             if updated:
-                # 建立報告：列出誰訂了什麼
                 report = "📋 【最新訂單明細】\n"
                 all_totals = {}
                 
                 for name, items in order_records.items():
-                    # 過濾數量大於 0 的品項
                     person_list = [f"{k}x{v}" for k, v in items.items() if v > 0]
                     if person_list:
                         report += f"\n👤 {name}: {', '.join(person_list)}"
                         for k, v in items.items():
                             all_totals[k] = all_totals.get(k, 0) + v
                 
-                # 顯示品項加總
                 report += "\n\n📦 目前總計：\n"
                 has_data = False
                 for k, v in all_totals.items():
@@ -130,6 +132,5 @@ def handle_message(event):
         logging.error(f"Message Error: {e}")
 
 if __name__ == "__main__":
-    # 自動適應 Render 的連接埠設定
     port = int(os.environ.get('PORT', 5000))
     app.run(host='0.0.0.0', port=port)
